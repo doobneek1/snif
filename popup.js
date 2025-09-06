@@ -1,14 +1,16 @@
 (function () {
   const input = document.getElementById("link");
-  const btn = document.getElementById("go");
+  const goBtn = document.getElementById("go");
+  const addBtn = document.getElementById("add-to-db");
+  const removeBtn = document.getElementById("remove-from-db");
   const statusEl = document.getElementById("status");
 
   const HEX24_RE = /([a-f0-9]{24})/i;
+  const MASKED_PROFILE_DB_KEY = "maskedProfileIds";
 
   function setStatus(msg, ok = true) {
     statusEl.textContent = msg;
     statusEl.style.color = ok ? "#0a0" : "#c00";
-    console.log("[Popup]", msg);
   }
 
   function extractHexId(str) {
@@ -17,77 +19,83 @@
     return m ? m[1] : null;
   }
 
-  function parseIdFromUrlMaybeChat(raw) {
-    // Accept full sniffies profile/chat URLs or any string containing a 24-hex
+  function parseIdFromUrl(raw) {
     try {
       const u = new URL(raw);
-      // Expect /profile/<id> or /profile/<id>/chat
       const parts = u.pathname.split("/").filter(Boolean);
       const idx = parts.indexOf("profile");
       if (idx >= 0 && parts[idx + 1]) {
         const id = extractHexId(parts[idx + 1]);
         if (id) return id;
       }
-      // Otherwise fall back to hex anywhere
       return extractHexId(raw);
     } catch {
       return extractHexId(raw);
     }
   }
 
-  function buildChatUrl(id) {
-    return `https://sniffies.com/profile/${id}/chat`;
+  async function updateDatabase(id, action) {
+    const { [MASKED_PROFILE_DB_KEY]: ids = [] } = await chrome.storage.local.get(MASKED_PROFILE_DB_KEY);
+    const idSet = new Set(ids);
+    let changed = false;
+
+    if (action === 'add') {
+      if (!idSet.has(id)) {
+        idSet.add(id);
+        changed = true;
+        setStatus(`ID ${id} added to DB.`);
+      } else {
+        setStatus(`ID ${id} is already in the DB.`);
+      }
+    } else if (action === 'remove') {
+      if (idSet.has(id)) {
+        idSet.delete(id);
+        changed = true;
+        setStatus(`ID ${id} removed from DB.`);
+      } else {
+        setStatus(`ID ${id} was not found in the DB.`, false);
+      }
+    }
+
+    if (changed) {
+      await chrome.storage.local.set({ [MASKED_PROFILE_DB_KEY]: [...idSet] });
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        chrome.tabs.sendMessage(tab.id, { type: "RESCAN_PAGE_FOR_MASKING" });
+      }
+    }
   }
 
-  btn.addEventListener("click", async () => {
-    setStatus("Starting…");
+  goBtn.addEventListener("click", async () => {
+    setStatus("Opening chat…");
     const raw = input.value.trim();
-    const id = parseIdFromUrlMaybeChat(raw);
+    const id = parseIdFromUrl(raw);
     if (!id) {
-      setStatus("Couldn’t find a 24-char ID in that input.", false);
+      setStatus("Couldn’t find a 24-char ID in the input.", false);
       return;
     }
-    const chatUrl = buildChatUrl(id);
+    const chatUrl = `https://sniffies.com/profile/${id}/chat`;
+    await chrome.runtime.sendMessage({ type: "OPEN_CHAT_URL", url: chatUrl });
+    setStatus("Opened chat in background.");
+  });
 
-    try {
-      // Always open background chat tab
-      await chrome.runtime.sendMessage({ type: "OPEN_CHAT_URL", url: chatUrl });
-      setStatus("Opened chat in background.");
-
-      // Optionally: try to “click” matching DOM element in the active tab
-      // (not necessary for opening chat, but kept if you still want the click)
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab && tab.id) {
-        const [{ result }] = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          world: "MAIN",
-          args: [id],
-          func: (hexId) => {
-            function dispatchClick(el) {
-              ["pointerdown", "mousedown", "mouseup", "click"].forEach(type =>
-                el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }))
-              );
-              return true;
-            }
-            const findImg = (id) =>
-              [...document.querySelectorAll('img[src*="profile.sniffiesassets.com/"]')].find(img => img.src.includes(id));
-
-            const findMarker = (id) =>
-              [...document.querySelectorAll('[data-testid="cv-marker-avatar-image"]')]
-                .find(div => (div.style.backgroundImage || getComputedStyle(div).backgroundImage).includes(id));
-
-            const target = findImg(hexId) || findMarker(hexId);
-            if (!target) return { ok: false, reason: "Element not found" };
-            dispatchClick(target);
-            return { ok: true, reason: "Clicked element" };
-          }
-        }).catch(() => [{ result: null }]);
-
-        console.log("[Popup] Injected click result:", result);
-      }
-    } catch (e) {
-      console.error("[Popup] Error:", e);
-      setStatus(`Error: ${e?.message || e}`, false);
+  addBtn.addEventListener("click", () => {
+    const raw = input.value.trim();
+    const id = parseIdFromUrl(raw);
+    if (!id) {
+      setStatus("No valid ID found to add.", false);
+      return;
     }
+    updateDatabase(id, 'add');
+  });
+
+  removeBtn.addEventListener("click", () => {
+    const raw = input.value.trim();
+    const id = parseIdFromUrl(raw);
+    if (!id) {
+      setStatus("No valid ID found to remove.", false);
+      return;
+    }
+    updateDatabase(id, 'remove');
   });
 })();

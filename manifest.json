@@ -3,7 +3,7 @@
   "name": "Sniffies Chat AutoSender",
   "version": "1.0.0",
   "description": "Opens a Sniffies profile link in background and auto-sends a chat message.",
-  "permissions": ["scripting", "activeTab", "tabs"],
+  "permissions": ["scripting", "activeTab", "tabs", "storage"],
   "host_permissions": ["https://sniffies.com/*"],  "action": {
     "default_popup": "popup.html"
   },
