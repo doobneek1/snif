@@ -1,6 +1,6 @@
 
 // --- CONFIG ---
-const HIDE_ICON_IF_MARKED = false; // set true to hide, false to color red
+const HIDE_ICON_IF_MARKED = true; // set true to hide, false to color red
 const FIREBASE_URL = 'https://doobneek-fe7b7-default-rtdb.firebaseio.com/snif';
 
 // --- SNACKBAR ---
@@ -80,29 +80,61 @@ function restoreIcon(node) {
 }
 
 function addContextMenuHandler(node, uuid) {
+  // Prevent adding multiple listeners
+  if (node.dataset.contextMenuAdded) return;
+  node.dataset.contextMenuAdded = 'true';
+
   node.addEventListener('contextmenu', async (e) => {
     e.preventDefault();
+    e.stopPropagation(); // Prevent other context menus
     await markUuid(uuid);
-    colorOrHideIcon(node);
+    // No longer needed here, will be handled by the global refresh
+    // colorOrHideIcon(node); 
     showSnackbar('Marked. Undo?', async () => {
       await unmarkUuid(uuid);
-      restoreIcon(node);
+      // restoreIcon(node); // Handled by global refresh
+      scanAndEnhanceIcons(); // Refresh all icons
     });
-  });
+    // Refresh all icons after marking
+    scanAndEnhanceIcons();
+  }, true); // Use capture to ensure it runs
 }
 
 async function processIcon(node) {
+  // Make sure we don't process children of a processed container
+  if (node.closest('[data-icon-processed="true"]')) return;
+
   const uuid = getUuidFromNode(node);
   if (!uuid) return;
+
+  // Mark as processed to avoid redundant checks and nested listeners
+  node.dataset.iconProcessed = 'true';
+
   if (await isUuidMarked(uuid)) {
     colorOrHideIcon(node);
+  } else {
+    // Explicitly restore if it was previously hidden/colored
+    restoreIcon(node);
   }
   addContextMenuHandler(node, uuid);
 }
 
+const ICON_SELECTORS = [
+  // General selectors
+  '.avatar', '.icon', '[data-uuid]',
+  // Sniffies specific selectors from other files
+  '[data-testid="avatarImage"]',
+  '[data-testid="cv-marker-avatar-image"]',
+  'img[src*="profile.sniffiesassets.com/"]',
+  '.avatar-img',
+  // grid component
+  '.sc-aXZVg.jMOBSC.sc-aXZVg.jMOBSC',
+  // profile card
+  '.sc-aXZVg.jMOBSC.sc-183g0u6-1.jQprxC'
+].join(',');
+
 function scanAndEnhanceIcons() {
-  // You may want to adjust this selector to match your icons/avatars
-  document.querySelectorAll('.chat-message-container, .avatar-img, .avatar, .icon, [data-uuid]').forEach(processIcon);
+  document.querySelectorAll(ICON_SELECTORS).forEach(processIcon);
 }
 
 // Initial scan
@@ -110,16 +142,23 @@ scanAndEnhanceIcons();
 
 // Watch for new icons
 new MutationObserver(muts => {
-  muts.forEach(m => {
-    m.addedNodes.forEach(node => {
-      if (node.nodeType === 1) {
-        if (node.matches('.chat-message-container, .avatar-img, .avatar, .icon, [data-uuid]')) {
-          processIcon(node);
-        } else {
-          // Check descendants
-          node.querySelectorAll?.('.chat-message-container, .avatar-img, .avatar, .icon, [data-uuid]').forEach(processIcon);
+  let needsScan = false;
+  for (const m of muts) {
+    if (m.type === 'childList' && m.addedNodes.length > 0) {
+      for (const node of m.addedNodes) {
+        if (node.nodeType === 1) {
+          if (node.matches(ICON_SELECTORS) || node.querySelector(ICON_SELECTORS)) {
+            needsScan = true;
+            break;
+          }
         }
       }
-    });
-  });
+    }
+    if (needsScan) break;
+  }
+  if (needsScan) {
+    // Debounce the scan to avoid excessive runs on rapid DOM changes
+    clearTimeout(window.snifflesIconScanDebounce);
+    window.snifflesIconScanDebounce = setTimeout(scanAndEnhanceIcons, 100);
+  }
 }).observe(document.body, { childList: true, subtree: true });

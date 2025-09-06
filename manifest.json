@@ -10,7 +10,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.sniffies.com/*"],
-      "js": ["content.js","jesus.js","read.js", "icons.js"],
+      "js": ["chat_links.js", "read.js", "icons.js"],
       "run_at": "document_idle"
     }
   ],  "background": {
