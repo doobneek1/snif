@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Sniffies Chat AutoSender",
+  "version": "1.0.0",
+  "description": "Opens a Sniffies profile link in background and auto-sends a chat message.",
+  "permissions": ["scripting", "activeTab", "tabs"],
+  "host_permissions": ["https://sniffies.com/*"],  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.sniffies.com/*"],
+      "js": ["content.js","jesus.js","read.js", "icons.js"],
+      "run_at": "document_idle"
+    }
+  ],  "background": {
+    "service_worker": "background.js"
+  }
+}
